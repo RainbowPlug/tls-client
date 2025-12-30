@@ -1,0 +1,184 @@
+name: Auto-Update TLS Client Binaries
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+  repository_dispatch:
+    types: [check-updates]
+
+jobs:
+  update-binaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests pygithub
+      
+      - name: Check for new releases
+        id: check_release
+        run: |
+          python << 'EOF'
+          import requests
+          import json
+          import os
+          
+          # Get latest release from bogdanfinn/tls-client
+          api_url = "https://api.github.com/repos/bogdanfinn/tls-client/releases/latest"
+          response = requests.get(api_url)
+          response.raise_for_status()
+          latest_release = response.json()
+          
+          latest_version = latest_release["tag_name"]
+          latest_published = latest_release["published_at"]
+          
+          # Check local version file if it exists
+          version_file = "tls_client/dependencies/version.txt"
+          local_version = None
+          if os.path.exists(version_file):
+              with open(version_file, "r") as f:
+                  lines = f.read().splitlines()
+                  if len(lines) > 0:
+                      local_version = lines[0]
+          
+          # Check if update is needed
+          needs_update = local_version != latest_version
+          
+          print(f"Latest version: {latest_version}")
+          print(f"Local version: {local_version}")
+          print(f"Needs update: {needs_update}")
+          
+          # Set output variables
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"latest_version={latest_version}\n")
+              f.write(f"latest_published={latest_published}\n")
+              f.write(f"local_version={local_version}\n")
+              f.write(f"needs_update={needs_update}\n")
+              f.write(f"release_data={json.dumps(latest_release)}\n")
+          
+          # Download assets info
+          assets = latest_release.get("assets", [])
+          asset_info = []
+          for asset in assets:
+              asset_info.append({
+                  "name": asset["name"],
+                  "url": asset["browser_download_url"],
+                  "size": asset["size"]
+              })
+          
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"assets={json.dumps(asset_info)}\n")
+          EOF
+      
+      - name: Download binaries
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          python << 'EOF'
+          import requests
+          import json
+          import os
+          import shutil
+          
+          # Parse assets from previous step
+          assets = json.loads('${{ steps.check_release.outputs.assets }}')
+          version = '${{ steps.check_release.outputs.latest_version }}'
+          
+          # Create dependencies directory
+          deps_dir = "tls_client/dependencies"
+          os.makedirs(deps_dir, exist_ok=True)
+          
+          # Download each binary asset
+          downloaded = []
+          for asset in assets:
+              name = asset["name"]
+              url = asset["url"]
+              
+              # Only download binary files (.dll, .so, .dylib)
+              if any(name.endswith(ext) for ext in ['.dll', '.so', '.dylib']):
+                  print(f"Downloading {name}...")
+                  response = requests.get(url, stream=True)
+                  response.raise_for_status()
+                  
+                  dest_path = os.path.join(deps_dir, name)
+                  with open(dest_path, "wb") as f:
+                      for chunk in response.iter_content(chunk_size=8192):
+                          f.write(chunk)
+                  
+                  downloaded.append(name)
+                  print(f"Downloaded {name} ({asset['size']} bytes)")
+          
+          print(f"Downloaded {len(downloaded)} binaries: {', '.join(downloaded)}")
+          EOF
+      
+      - name: Update version file
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          python << 'EOF'
+          import os
+          from datetime import datetime, timezone
+          
+          version = '${{ steps.check_release.outputs.latest_version }}'
+          published = '${{ steps.check_release.outputs.latest_published }}'
+          etag = '${{ github.run_id }}'
+          now = datetime.now(timezone.utc).isoformat()
+          
+          version_file = "tls_client/dependencies/version.txt"
+          os.makedirs(os.path.dirname(version_file), exist_ok=True)
+          
+          with open(version_file, "w") as f:
+              f.write(f"{version}\n{published}\n{now}\n{etag}\n")
+          
+          print(f"Updated version file: {version}")
+          EOF
+      
+      - name: Commit and push changes
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add tls_client/dependencies/
+          git commit -m "Auto-update: Update tls-client binaries to ${{ steps.check_release.outputs.latest_version }}"
+          git push
+      
+      - name: Create GitHub Release
+        if: steps.check_release.outputs.needs_update == 'True'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ steps.check_release.outputs.latest_version }}"
+          name: "Release ${{ steps.check_release.outputs.latest_version }}"
+          body: |
+            Auto-updated binaries from bogdanfinn/tls-client
+            
+            **Version:** ${{ steps.check_release.outputs.latest_version }}
+            **Published:** ${{ steps.check_release.outputs.latest_published }}
+            
+            This release was automatically created by the update workflow.
+          files: |
+            tls_client/dependencies/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Summary
+        run: |
+          if [ "${{ steps.check_release.outputs.needs_update }}" == "True" ]; then
+            echo "✅ Updated to version ${{ steps.check_release.outputs.latest_version }}"
+          else
+            echo "ℹ️ Already up to date (version ${{ steps.check_release.outputs.local_version }})"
+          fi
+

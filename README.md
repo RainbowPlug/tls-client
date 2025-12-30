@@ -1,5 +1,5 @@
 # Python-TLS-Client
-Python-TLS-Client is an advanced HTTP library based on requests and tls-client.
+For of the famous FlorianRegaz TLS-client with auto updating libs from bogdanfinn
 
 # Installation
 ```

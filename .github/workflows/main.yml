@@ -1,0 +1,327 @@
+name: Auto-Update TLS Client Binaries
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+  repository_dispatch:
+    types: [check-updates]
+
+jobs:
+  update-binaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write  # For PyPI publishing
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests pygithub build twine
+      
+      - name: Check for new releases
+        id: check_release
+        run: |
+          python << 'EOF'
+          import requests
+          import json
+          import os
+          
+          # Get latest release from bogdanfinn/tls-client
+          api_url = "https://api.github.com/repos/bogdanfinn/tls-client/releases/latest"
+          response = requests.get(api_url)
+          response.raise_for_status()
+          latest_release = response.json()
+          
+          latest_version = latest_release["tag_name"]
+          latest_published = latest_release["published_at"]
+          
+          # Check local version file if it exists
+          version_file = "tls_client/dependencies/version.txt"
+          local_version = None
+          if os.path.exists(version_file):
+              with open(version_file, "r") as f:
+                  lines = f.read().splitlines()
+                  if len(lines) > 0:
+                      local_version = lines[0]
+          
+          # Check if update is needed
+          needs_update = local_version != latest_version
+          
+          print(f"Latest version: {latest_version}")
+          print(f"Local version: {local_version}")
+          print(f"Needs update: {needs_update}")
+          
+          # Set output variables
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"latest_version={latest_version}\n")
+              f.write(f"latest_published={latest_published}\n")
+              f.write(f"local_version={local_version}\n")
+              f.write(f"needs_update={needs_update}\n")
+              f.write(f"release_data={json.dumps(latest_release)}\n")
+          
+          # Download assets info
+          assets = latest_release.get("assets", [])
+          asset_info = []
+          for asset in assets:
+              asset_info.append({
+                  "name": asset["name"],
+                  "url": asset["browser_download_url"],
+                  "size": asset["size"]
+              })
+          
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"assets={json.dumps(asset_info)}\n")
+          EOF
+      
+      - name: Download binaries
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          python << 'EOF'
+          import requests
+          import json
+          import os
+          import shutil
+          
+          # Parse assets from previous step
+          assets = json.loads('${{ steps.check_release.outputs.assets }}')
+          version = '${{ steps.check_release.outputs.latest_version }}'
+          
+          # Create dependencies directory
+          deps_dir = "tls_client/dependencies"
+          os.makedirs(deps_dir, exist_ok=True)
+          
+          # Download each binary asset
+          downloaded = []
+          for asset in assets:
+              name = asset["name"]
+              url = asset["url"]
+              
+              # Only download binary files (.dll, .so, .dylib)
+              if any(name.endswith(ext) for ext in ['.dll', '.so', '.dylib']):
+                  print(f"Downloading {name}...")
+                  response = requests.get(url, stream=True)
+                  response.raise_for_status()
+                  
+                  dest_path = os.path.join(deps_dir, name)
+                  with open(dest_path, "wb") as f:
+                      for chunk in response.iter_content(chunk_size=8192):
+                          f.write(chunk)
+                  
+                  downloaded.append(name)
+                  print(f"Downloaded {name} ({asset['size']} bytes)")
+          
+          print(f"Downloaded {len(downloaded)} binaries: {', '.join(downloaded)}")
+          EOF
+      
+      - name: Get current package version
+        if: steps.check_release.outputs.needs_update == 'True'
+        id: current_version
+        run: |
+          python << 'EOF'
+          import re
+          import os
+          
+          setup_file = "setup.py"
+          current_version = "0.0.1"  # Default
+          
+          if not os.path.exists(setup_file):
+              # Try to find version in __init__.py or _version.py
+              for file in ["tls_client/__init__.py", "tls_client/_version.py"]:
+                  if os.path.exists(file):
+                      with open(file, "r") as f:
+                          content = f.read()
+                          match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
+                          if match:
+                              current_version = match.group(1)
+                              break
+          else:
+              # Read from setup.py
+              with open(setup_file, "r") as f:
+                  content = f.read()
+                  
+              # Try to find version in setup.py
+              match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
+              if match:
+                  current_version = match.group(1)
+          
+          # Write to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"version={current_version}\n")
+          
+          print(f"Current package version: {current_version}")
+          EOF
+      
+      - name: Increment version
+        if: steps.check_release.outputs.needs_update == 'True'
+        id: new_version
+        run: |
+          python << 'EOF'
+          import re
+          import os
+          
+          current = '${{ steps.current_version.outputs.version }}'
+          if not current:
+              current = "0.0.1"
+          
+          # Parse version (e.g., "0.2.2" -> [0, 2, 2])
+          parts = current.split('.')
+          if len(parts) < 3:
+              parts = (parts + ['0'] * 3)[:3]
+          
+          try:
+              major, minor, patch = map(int, parts)
+              # Increment patch version
+              new_patch = patch + 1
+              new_version = f"{major}.{minor}.{new_patch}"
+          except:
+              # Fallback: just append .1
+              new_version = f"{current}.1"
+          
+          # Write to GITHUB_OUTPUT file
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"new_version={new_version}\n")
+          
+          print(f"Current version: {current}")
+          print(f"New version: {new_version}")
+          EOF
+      
+      - name: Update version file
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          python << 'EOF'
+          import os
+          from datetime import datetime, timezone
+          
+          version = '${{ steps.check_release.outputs.latest_version }}'
+          published = '${{ steps.check_release.outputs.latest_published }}'
+          etag = '${{ github.run_id }}'
+          now = datetime.now(timezone.utc).isoformat()
+          
+          version_file = "tls_client/dependencies/version.txt"
+          os.makedirs(os.path.dirname(version_file), exist_ok=True)
+          
+          with open(version_file, "w") as f:
+              f.write(f"{version}\n{published}\n{now}\n{etag}\n")
+          
+          print(f"Updated version file: {version}")
+          EOF
+      
+      - name: Update setup.py version
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          python << 'EOF'
+          import re
+          import os
+          
+          setup_file = "setup.py"
+          new_version = '${{ steps.new_version.outputs.new_version }}'
+          
+          if not os.path.exists(setup_file):
+              print("setup.py not found, skipping version update")
+              exit(0)
+          
+          with open(setup_file, "r") as f:
+              content = f.read()
+          
+          # Replace version in setup.py
+          # Pattern: version="X.Y.Z" or version='X.Y.Z'
+          pattern = r'version\s*=\s*["\']([^"\']+)["\']'
+          replacement = f'version="{new_version}"'
+          
+          new_content = re.sub(pattern, replacement, content)
+          
+          if new_content != content:
+              with open(setup_file, "w") as f:
+                  f.write(new_content)
+              print(f"Updated setup.py version to {new_version}")
+          else:
+              # Try alternative pattern
+              pattern2 = r'__version__\s*=\s*["\']([^"\']+)["\']'
+              new_content = re.sub(pattern2, replacement, content)
+              if new_content != content:
+                  with open(setup_file, "w") as f:
+                      f.write(new_content)
+                  print(f"Updated version in __init__.py to {new_version}")
+              else:
+                  print("Warning: Could not find version to update")
+          EOF
+      
+      - name: Build package
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          python -m build
+      
+      - name: Publish to PyPI
+        if: steps.check_release.outputs.needs_update == 'True'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip_existing: true
+      
+      - name: Commit and push changes
+        if: steps.check_release.outputs.needs_update == 'True'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add tls_client/dependencies/ setup.py
+          git commit -m "Auto-update: Update tls-client binaries to ${{ steps.check_release.outputs.latest_version }} and bump version to ${{ steps.new_version.outputs.new_version }}"
+          git tag -a "v${{ steps.new_version.outputs.new_version }}" -m "Release ${{ steps.new_version.outputs.new_version }}"
+          git push
+          git push --tags
+      
+      - name: Create GitHub Release
+        if: steps.check_release.outputs.needs_update == 'True'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v${{ steps.new_version.outputs.new_version }}"
+          name: "Release ${{ steps.new_version.outputs.new_version }}"
+          body: |
+            Auto-updated binaries from bogdanfinn/tls-client
+            
+            **Package Version:** ${{ steps.new_version.outputs.new_version }}
+            **Binary Version:** ${{ steps.check_release.outputs.latest_version }}
+            **Published:** ${{ steps.check_release.outputs.latest_published }}
+            
+            This release was automatically created by the update workflow.
+            
+            Install with:
+            ```bash
+            pip install tls-client2==${{ steps.new_version.outputs.new_version }} --upgrade
+            ```
+            
+            Or install from GitHub:
+            ```bash
+            pip install git+https://github.com/RainbowPlug/tls-client.git@v${{ steps.new_version.outputs.new_version }}
+            ```
+          files: |
+            dist/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Summary
+        run: |
+          if [ "${{ steps.check_release.outputs.needs_update }}" == "True" ]; then
+            echo "✅ Updated binaries to ${{ steps.check_release.outputs.latest_version }}"
+            echo "✅ Bumped package version to ${{ steps.new_version.outputs.new_version }}"
+            echo "✅ Published to PyPI"
+            echo ""
+            echo "Install with: pip install tls-client2==${{ steps.new_version.outputs.new_version }}"
+          else
+            echo "ℹ️ Already up to date (version ${{ steps.check_release.outputs.local_version }})"
+          fi
+

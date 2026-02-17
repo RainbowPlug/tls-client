@@ -38,35 +38,49 @@ LOCAL_VERSION_FILE = os.path.join(DEPENDENCIES_DIR, "version.txt")
 CHECK_INTERVAL = timedelta(hours=24)
 
 
-def get_dependency_filename() -> str:
-    """Get the expected binary filename based on platform"""
+def get_release_asset_prefix() -> str:
+    """Get the release asset prefix used in bogdanfinn/tls-client releases.
+    
+    Release assets are named like: tls-client-windows-64-1.14.0.dll
+    We need the prefix (e.g. 'tls-client-windows-64') to match against release assets.
+    """
     system = platform.system().lower()
     machine = platform.machine().lower()
     
     if system == "windows":
         if machine in ["amd64", "x86_64"]:
-            return "tls-client-windows-amd64.dll"
+            return "tls-client-windows-64"
         elif machine in ["x86", "i386"]:
-            return "tls-client-windows-386.dll"
+            return "tls-client-windows-32"
         else:
-            return "tls-client-windows-amd64.dll"  # Default
+            return "tls-client-windows-64"  # Default
     elif system == "linux":
         if machine in ["amd64", "x86_64"]:
-            return "tls-client-linux-amd64.so"
+            return "tls-client-linux-ubuntu-amd64"
         elif machine in ["arm64", "aarch64"]:
-            return "tls-client-linux-arm64.so"
+            return "tls-client-linux-arm64"
         else:
-            return "tls-client-linux-amd64.so"  # Default
+            return "tls-client-linux-ubuntu-amd64"  # Default
     elif system == "darwin":
         if machine in ["arm64", "aarch64"]:
-            return "tls-client-darwin-arm64.dylib"
+            return "tls-client-darwin-arm64"
         else:
-            return "tls-client-darwin-amd64.dylib"
+            return "tls-client-darwin-amd64"
     else:
         raise ValueError(f"Unsupported platform: {system}")
 
 
-CURRENT_DEPENDENCY_FILENAME = get_dependency_filename()
+def get_local_dependency_filename() -> str:
+    """Get the local filename the loader expects (from utils.py).
+    
+    The loader (cffi.py -> utils.py) expects filenames like: tls-client-64.dll
+    """
+    from .utils import get_dependency_filename as _get_loader_filename
+    return _get_loader_filename()
+
+
+RELEASE_ASSET_PREFIX = get_release_asset_prefix()
+LOCAL_DEPENDENCY_FILENAME = get_local_dependency_filename()
 
 
 def get_latest_release(session: requests.Session) -> tuple[Any, str | None] | None:
@@ -218,27 +232,29 @@ def update_lib(force: bool = False) -> bool:
     print(f"New version found: {latest_version}. Updating...")
 
     assets = latest_release["assets"]
-    dependency_base = CURRENT_DEPENDENCY_FILENAME.rsplit(".", 1)[0]
     
     found_asset = False
     for asset in assets:
-        if asset["name"].startswith(dependency_base):
+        # Match release asset prefix (e.g. "tls-client-windows-64" matches "tls-client-windows-64-1.14.0.dll")
+        # But skip xgo variants (e.g. "tls-client-xgo-1.14.0-windows-amd64.dll")
+        if asset["name"].startswith(RELEASE_ASSET_PREFIX) and "xgo" not in asset["name"]:
             download_url = asset["browser_download_url"]
-            dest_path = os.path.join(DEPENDENCIES_DIR, CURRENT_DEPENDENCY_FILENAME)
+            # Save as the filename the loader expects (e.g. tls-client-64.dll)
+            dest_path = os.path.join(DEPENDENCIES_DIR, LOCAL_DEPENDENCY_FILENAME)
             
-            print(f"Downloading {CURRENT_DEPENDENCY_FILENAME} from {download_url}...")
+            print(f"Downloading {asset['name']} -> {LOCAL_DEPENDENCY_FILENAME} ...")
             if download_file(session, download_url, dest_path):
-                print(f"Successfully downloaded {CURRENT_DEPENDENCY_FILENAME}")
+                print(f"Successfully downloaded and saved as {LOCAL_DEPENDENCY_FILENAME}")
                 save_local_version(latest_version, last_modified, etag)
                 print(f"Updated to version {latest_version}")
                 found_asset = True
                 return True
             else:
-                print(f"Failed to download {CURRENT_DEPENDENCY_FILENAME}")
+                print(f"Failed to download {asset['name']}")
                 return False
     
     if not found_asset:
-        print(f"Could not find asset for {CURRENT_DEPENDENCY_FILENAME}")
+        print(f"Could not find asset matching prefix '{RELEASE_ASSET_PREFIX}'")
         print(f"Available assets: {[a['name'] for a in assets]}")
         return False
     

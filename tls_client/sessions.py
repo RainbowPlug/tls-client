@@ -93,6 +93,7 @@ class Session:
                  certificate_pinning: Optional[Dict[str, List[str]]] = None,
                  disable_ipv6: bool = False,
                  disable_ipv4: bool = False,
+                 transport_options: Optional[Dict[str, Any]] = None,
                  ) -> None:
 
         self.MAX_REDIRECTS: int = 30
@@ -341,6 +342,28 @@ class Session:
         # disable ipv6/ipv4
         self.disable_ipv6 = disable_ipv6
         self.disable_ipv4 = disable_ipv4
+
+        # Transport options — passes through to Go http.Transport / http2.Transport
+        # via cffi_src/types.go:TransportOptions. Use this to override defaults like
+        # idleConnTimeout (default 90s in Go, too long for Akamai-fronted edges
+        # which silently kill idle conns earlier — leaves stale pool entries that
+        # wedge POSTs since Go does not retry non-idempotent methods).
+        #
+        # Field names match the Go struct (camelCase). IdleConnTimeout is typed
+        # *time.Duration so it must be passed as int64 NANOSECONDS, e.g.:
+        #   transport_options={"idleConnTimeout": 10_000_000_000}  # 10 seconds
+        #
+        # Full list of keys (see cffi_src/types.go):
+        #   idleConnTimeout       (int64 nanoseconds)
+        #   maxIdleConns          (int)
+        #   maxIdleConnsPerHost   (int)
+        #   maxConnsPerHost       (int)
+        #   maxResponseHeaderBytes(int64)
+        #   writeBufferSize       (int)
+        #   readBufferSize        (int)
+        #   disableKeepAlives     (bool)
+        #   disableCompression    (bool)
+        self.transport_options = transport_options
         # debugging
         self.debug = debug
 
@@ -511,18 +534,8 @@ class Session:
         if certificate_pinning:
             request_payload["certificatePinningHosts"] = certificate_pinning
 
-        if False:
-            request_payload["transportOptions"] = {
-                "disableCompression": False,
-                "disableKeepAlives": False,
-                "idleConnTimeout": 0,
-                "maxConnsPerHost": 0,
-                "maxIdleConns": 0,
-                "maxIdleConnsPerHost": 0,
-                "maxResponseHeaderBytes": 0,
-                "readBufferSize": 0,
-                "writeBufferSize": 0,
-            }
+        if self.transport_options is not None:
+            request_payload["transportOptions"] = self.transport_options
 
         if self.client_identifier is None:
             request_payload["customTlsClient"] = {

@@ -93,36 +93,58 @@ jobs:
           import json
           import os
           import shutil
-          
+
           # Parse assets from previous step
           assets = json.loads('${{ steps.check_release.outputs.assets }}')
           version = '${{ steps.check_release.outputs.latest_version }}'
-          
+
           # Create dependencies directory
           deps_dir = "tls_client/dependencies"
           os.makedirs(deps_dir, exist_ok=True)
-          
+
           # Download each binary asset
           downloaded = []
           for asset in assets:
               name = asset["name"]
               url = asset["url"]
-              
+
               # Only download binary files (.dll, .so, .dylib)
               if any(name.endswith(ext) for ext in ['.dll', '.so', '.dylib']):
                   print(f"Downloading {name}...")
                   response = requests.get(url, stream=True)
                   response.raise_for_status()
-                  
+
                   dest_path = os.path.join(deps_dir, name)
                   with open(dest_path, "wb") as f:
                       for chunk in response.iter_content(chunk_size=8192):
                           f.write(chunk)
-                  
+
                   downloaded.append(name)
                   print(f"Downloaded {name} ({asset['size']} bytes)")
-          
+
           print(f"Downloaded {len(downloaded)} binaries: {', '.join(downloaded)}")
+
+          # Wire up the unversioned loader filenames (utils.py:get_dependency_filename).
+          # Without this the loader keeps reading whatever binary was last committed
+          # under tls-client-64.dll / tls-client-amd64.so / etc.
+          version_tag = version.lstrip('v')
+          loader_map = {
+              f"tls-client-windows-64-{version_tag}.dll":       "tls-client-64.dll",
+              f"tls-client-windows-32-{version_tag}.dll":       "tls-client-32.dll",
+              f"tls-client-linux-ubuntu-amd64-{version_tag}.so":"tls-client-amd64.so",
+              f"tls-client-linux-arm64-{version_tag}.so":       "tls-client-arm64.so",
+              f"tls-client-darwin-arm64-{version_tag}.dylib":   "tls-client-arm64.dylib",
+              f"tls-client-darwin-amd64-{version_tag}.dylib":   "tls-client-x86.dylib",
+              f"tls-client-xgo-{version_tag}-linux-386.so":     "tls-client-x86.so",
+          }
+          for src_name, dst_name in loader_map.items():
+              src = os.path.join(deps_dir, src_name)
+              dst = os.path.join(deps_dir, dst_name)
+              if os.path.exists(src):
+                  shutil.copy2(src, dst)
+                  print(f"Wired loader filename: {dst_name} <- {src_name}")
+              else:
+                  print(f"WARN: missing source for loader wiring: {src_name}")
           EOF
       
       - name: Get current package version

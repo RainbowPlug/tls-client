@@ -6,11 +6,21 @@ import sys
 import os
 
 
-data_files = []
-directories = glob.glob('tls_client/dependencies/')
-for directory in directories:
-    files = glob.glob(directory+'*')
-    data_files.append(('tls_client/dependencies', files))
+# Only ship the unversioned loader binaries the runtime actually loads
+# (tls_client/utils.py:get_dependency_filename), NOT the accumulated historical
+# versioned/xgo binaries in dependencies/ - those bloated the wheel to ~470 MB,
+# over PyPI's 100 MB per-file limit. This keeps the wheel ~60 MB.
+_LOADER_FILES = [
+    'tls-client-64.dll', 'tls-client-32.dll',
+    'tls-client-amd64.so', 'tls-client-arm64.so', 'tls-client-x86.so',
+    'tls-client-arm64.dylib', 'tls-client-x86.dylib',
+    'version.txt',
+]
+data_files = [(
+    'tls_client/dependencies',
+    [os.path.join('tls_client/dependencies', f) for f in _LOADER_FILES
+     if os.path.exists(os.path.join('tls_client/dependencies', f))],
+)]
 
 about = {}
 here = os.path.abspath(os.path.dirname(__file__))
@@ -29,9 +39,9 @@ setup(
     long_description=readme,
     long_description_content_type="text/markdown",
     packages=find_packages(),
-    include_package_data=True,
+    include_package_data=False,
     package_data={
-        '': ['*'],
+        'tls_client': ['dependencies/' + f for f in _LOADER_FILES],
     },
     classifiers=[
         "Environment :: Web Environment",

@@ -1,9 +1,11 @@
 name: Auto-Update TLS Client Binaries
 
 on:
-  schedule:
-    # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
+  # DISABLED 2026-07-20: this pulls the latest bogdan RELEASE (chrome_146) and would
+  # overwrite the master-built chrome_150 binaries on its next run. Re-enable the
+  # schedule only once bogdanfinn ships chrome_150 in a tagged release.
+  # schedule:
+  #   - cron: '0 2 * * *'
   workflow_dispatch:  # Allow manual triggering
   repository_dispatch:
     types: [check-updates]

@@ -717,7 +717,7 @@ class Session:
         """Sends a POST request"""
         if kwargs.get("stream", False):
             # todo head for post request doesn't always work correctly
-            head_data = self.head(url, allow_redircts=True, **kwargs)
+            head_data = self.head(url, allow_redirects=True, **kwargs)
             stream_data_thread = SteamThread(
                 main_request=head_data,
                 target=self.execute_request,

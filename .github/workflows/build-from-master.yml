@@ -1,0 +1,154 @@
+name: Build binaries from bogdan master (Chrome 150)
+
+# Builds the tls-client c-shared native libraries from bogdanfinn/tls-client @ master,
+# which carries the Chrome_150 profile (not yet in any tagged bogdan release).
+# Produces win-64 + linux-amd64 + darwin-amd64 + darwin-arm64, and commits them into
+# tls_client/dependencies/ under the loader filenames the wrapper expects.
+#
+# Trigger: manually (Run workflow) or automatically on a push that changes source
+# (deps/ pushes are ignored so the bot's own binary commit can't re-trigger it).
+
+on:
+  workflow_dispatch:
+    inputs:
+      bogdan_ref:
+        description: "bogdanfinn/tls-client git ref to build (must contain Chrome_150)"
+        default: "master"
+        required: true
+  push:
+    branches: [main]
+    paths-ignore:
+      - "tls_client/dependencies/**"
+      - "**/*.md"
+
+permissions:
+  contents: write
+
+env:
+  BOGDAN_REF: ${{ github.event.inputs.bogdan_ref || 'master' }}
+  GO_VERSION: "1.24.1"
+
+jobs:
+  build-desktop:
+    name: Build windows-64 + linux-amd64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout bogdanfinn/tls-client (${{ env.BOGDAN_REF }})
+        uses: actions/checkout@v4
+        with:
+          repository: bogdanfinn/tls-client
+          ref: ${{ env.BOGDAN_REF }}
+          path: bogdan
+      - name: Fail fast if Chrome_150 is not present in this ref
+        run: |
+          grep -q '"chrome_150"' bogdan/profiles/profiles.go \
+            || { echo "::error::Chrome_150 not found in bogdan ref ${BOGDAN_REF}"; exit 1; }
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install mingw-w64 (windows cross-compiler)
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Pin cffi dep to bogdan master (brings in Chrome_150) and build
+        working-directory: bogdan/cffi_dist
+        run: |
+          set -euxo pipefail
+          go get github.com/bogdanfinn/tls-client@${BOGDAN_REF}
+          go mod tidy
+          go list -m github.com/bogdanfinn/tls-client
+          mkdir -p out
+          GOOS=linux   CGO_ENABLED=1 GOARCH=amd64 \
+            go build -buildvcs=false -buildmode=c-shared -o out/tls-client-amd64.so .
+          GOOS=windows CGO_ENABLED=1 GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
+            go build -buildvcs=false -buildmode=c-shared -o out/tls-client-64.dll .
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop
+          path: |
+            bogdan/cffi_dist/out/tls-client-amd64.so
+            bogdan/cffi_dist/out/tls-client-64.dll
+          if-no-files-found: error
+
+  build-mac:
+    name: Build ${{ matrix.out }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13   # Intel
+            goarch: amd64
+            out: tls-client-x86.dylib
+          - runner: macos-14   # Apple Silicon
+            goarch: arm64
+            out: tls-client-arm64.dylib
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout bogdanfinn/tls-client (${{ env.BOGDAN_REF }})
+        uses: actions/checkout@v4
+        with:
+          repository: bogdanfinn/tls-client
+          ref: ${{ env.BOGDAN_REF }}
+          path: bogdan
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Pin cffi dep to bogdan master and build darwin/${{ matrix.goarch }}
+        working-directory: bogdan/cffi_dist
+        run: |
+          set -euxo pipefail
+          go get github.com/bogdanfinn/tls-client@${BOGDAN_REF}
+          go mod tidy
+          mkdir -p out
+          GOOS=darwin CGO_ENABLED=1 GOARCH=${{ matrix.goarch }} \
+            go build -buildvcs=false -buildmode=c-shared -o out/${{ matrix.out }} .
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.goarch }}
+          path: bogdan/cffi_dist/out/${{ matrix.out }}
+          if-no-files-found: error
+
+  assemble:
+    name: Commit chrome_150 binaries to the fork
+    needs: [build-desktop, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Download built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+      - name: Place binaries under loader filenames
+        run: |
+          set -euxo pipefail
+          dst=tls_client/dependencies
+          mkdir -p "$dst"
+          cp _artifacts/desktop/tls-client-amd64.so   "$dst/tls-client-amd64.so"
+          cp _artifacts/desktop/tls-client-64.dll      "$dst/tls-client-64.dll"
+          cp _artifacts/mac-amd64/tls-client-x86.dylib  "$dst/tls-client-x86.dylib"
+          cp _artifacts/mac-arm64/tls-client-arm64.dylib "$dst/tls-client-arm64.dylib"
+          ls -la "$dst"
+      - name: Stamp version.txt with the chrome_150 build marker
+        run: |
+          set -euxo pipefail
+          ref_full=$(git ls-remote https://github.com/bogdanfinn/tls-client.git "${BOGDAN_REF}" | cut -f1 | head -c 12)
+          [ -n "$ref_full" ] || ref_full="${BOGDAN_REF}"
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          printf 'chrome150-master-%s\n%s\n%s\n%s\n' "$ref_full" "$now" "$now" "${{ github.run_id }}" \
+            > tls_client/dependencies/version.txt
+          cat tls_client/dependencies/version.txt
+      - name: Commit binaries
+        run: |
+          set -euxo pipefail
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action (chrome150 build)"
+          git add tls_client/dependencies/
+          if git diff --cached --quiet; then
+            echo "No binary changes to commit."
+          else
+            git commit -m "build: Chrome_150 c-shared binaries from bogdan master [skip ci]"
+            git push
+          fi

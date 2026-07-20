@@ -25,6 +25,15 @@ ClientIdentifiers: TypeAlias = Literal[
 	"chrome_144_PSK",
 	"chrome_146",
 	"chrome_146_PSK",
+    # Chrome 150 (built from bogdan master; matches CHROME_VERSION=150 UA)
+    "chrome_150",
+    "chrome_150_PSK",
+    # Other Chrome profiles present in the master binary
+    "chrome_130_PSK",
+    "chrome_131",
+    # Brave
+    "brave_146",
+    "brave_146_PSK",
     # Safari
     "safari_15_6_1",
     "safari_16_0",
@@ -52,6 +61,7 @@ ClientIdentifiers: TypeAlias = Literal[
     "firefox_132",
     "firefox_133",
     "firefox_135",
+    "firefox_148",
     # Opera
     "opera_89",
     "opera_90",

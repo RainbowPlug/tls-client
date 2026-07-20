@@ -75,13 +75,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13   # Intel
-            goarch: amd64
+          - goarch: amd64
             out: tls-client-x86.dylib
-          - runner: macos-14   # Apple Silicon
-            goarch: arm64
+            cc: "clang -arch x86_64"
+          - goarch: arm64
             out: tls-client-arm64.dylib
-    runs-on: ${{ matrix.runner }}
+            cc: "clang -arch arm64"
+    # Both arches build on the arm64 runner; amd64 cross-compiles via clang -arch.
+    # (macos-13 Intel runners queue unreliably, so we avoid depending on them.)
+    runs-on: macos-14
     steps:
       - name: Checkout bogdanfinn/tls-client (${{ env.BOGDAN_REF }})
         uses: actions/checkout@v4
@@ -99,7 +101,7 @@ jobs:
           go get github.com/bogdanfinn/tls-client@${BOGDAN_REF}
           go mod tidy
           mkdir -p out
-          GOOS=darwin CGO_ENABLED=1 GOARCH=${{ matrix.goarch }} \
+          GOOS=darwin CGO_ENABLED=1 GOARCH=${{ matrix.goarch }} CC="${{ matrix.cc }}" \
             go build -buildvcs=false -buildmode=c-shared -o out/${{ matrix.out }} .
           ls -la out
       - uses: actions/upload-artifact@v4

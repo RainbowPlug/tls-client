@@ -1,9 +1,13 @@
 name: Auto-Update TLS Client Binaries
 
 on:
-  # DISABLED 2026-07-20: this pulls the latest bogdan RELEASE (chrome_146) and would
-  # overwrite the master-built chrome_150 binaries on its next run. Re-enable the
-  # schedule only once bogdanfinn ships chrome_150 in a tagged release.
+  # DISABLED 2026-07-20, still disabled 2026-09-02: this pulls the latest bogdan
+  # RELEASE and would overwrite the master-built binaries on its next run. The gap
+  # has WIDENED rather than closed, so this stays off: the newest tagged release
+  # is still behind, while master now carries chrome_152 (72add196) on top of the
+  # chrome_150 this was originally turned off for. Re-enable the schedule only
+  # once bogdanfinn ships chrome_152 in a tagged release, and check that the tag
+  # really contains it before trusting this again.
   # schedule:
   #   - cron: '0 2 * * *'
   workflow_dispatch:  # Allow manual triggering

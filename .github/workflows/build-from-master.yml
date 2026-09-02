@@ -46,8 +46,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Install mingw-w64 (windows cross-compiler)
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Install cross-compilers (win 32/64, linux arm64, linux 386)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+                                  gcc-aarch64-linux-gnu gcc-multilib
       - name: Pin cffi dep to bogdan master (brings in Chrome_152) and build
         working-directory: bogdan/cffi_dist
         run: |
@@ -60,13 +63,32 @@ jobs:
             go build -buildvcs=false -buildmode=c-shared -o out/tls-client-amd64.so .
           GOOS=windows CGO_ENABLED=1 GOARCH=amd64 CC=x86_64-w64-mingw32-gcc \
             go build -buildvcs=false -buildmode=c-shared -o out/tls-client-64.dll .
+          # The three that setup.py SHIPS but this workflow never built. They
+          # sat at chrome_146 from 2026-05-11 while settings.py advertised 150
+          # and then 152. An identifier the binary lacks does NOT raise:
+          # bogdanfinn silently serves its default profile, so a stale platform
+          # was never a loud failure, it was a wrong fingerprint with no error
+          # and no log.
+          GOOS=linux   CGO_ENABLED=1 GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
+            go build -buildvcs=false -buildmode=c-shared -o out/tls-client-arm64.so .
+          GOOS=linux   CGO_ENABLED=1 GOARCH=386 CC="gcc -m32" \
+            go build -buildvcs=false -buildmode=c-shared -o out/tls-client-x86.so .
+          GOOS=windows CGO_ENABLED=1 GOARCH=386 CC=i686-w64-mingw32-gcc \
+            go build -buildvcs=false -buildmode=c-shared -o out/tls-client-32.dll .
           ls -la out
+          # Every binary we ship must carry the profile settings.py advertises.
+          for f in out/*.so out/*.dll; do
+            grep -q 'chrome_152' "$f" || { echo "::error::$f lacks chrome_152"; exit 1; }
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: desktop
           path: |
             bogdan/cffi_dist/out/tls-client-amd64.so
             bogdan/cffi_dist/out/tls-client-64.dll
+            bogdan/cffi_dist/out/tls-client-arm64.so
+            bogdan/cffi_dist/out/tls-client-x86.so
+            bogdan/cffi_dist/out/tls-client-32.dll
           if-no-files-found: error
 
   build-mac:
@@ -130,6 +152,9 @@ jobs:
           mkdir -p "$dst"
           cp _artifacts/desktop/tls-client-amd64.so   "$dst/tls-client-amd64.so"
           cp _artifacts/desktop/tls-client-64.dll      "$dst/tls-client-64.dll"
+          cp _artifacts/desktop/tls-client-arm64.so    "$dst/tls-client-arm64.so"
+          cp _artifacts/desktop/tls-client-x86.so      "$dst/tls-client-x86.so"
+          cp _artifacts/desktop/tls-client-32.dll      "$dst/tls-client-32.dll"
           cp _artifacts/mac-amd64/tls-client-x86.dylib  "$dst/tls-client-x86.dylib"
           cp _artifacts/mac-arm64/tls-client-arm64.dylib "$dst/tls-client-arm64.dylib"
           ls -la "$dst"

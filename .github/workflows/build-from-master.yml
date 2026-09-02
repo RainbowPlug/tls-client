@@ -1,7 +1,7 @@
-name: Build binaries from bogdan master (Chrome 150)
+name: Build binaries from bogdan master (Chrome 152)
 
 # Builds the tls-client c-shared native libraries from bogdanfinn/tls-client @ master,
-# which carries the Chrome_150 profile (not yet in any tagged bogdan release).
+# which carries the Chrome_152 profile (not yet in any tagged bogdan release).
 # Produces win-64 + linux-amd64 + darwin-amd64 + darwin-arm64, and commits them into
 # tls_client/dependencies/ under the loader filenames the wrapper expects.
 #
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       bogdan_ref:
-        description: "bogdanfinn/tls-client git ref to build (must contain Chrome_150)"
+        description: "bogdanfinn/tls-client git ref to build (must contain Chrome_152)"
         default: "master"
         required: true
   push:
@@ -39,16 +39,16 @@ jobs:
           repository: bogdanfinn/tls-client
           ref: ${{ env.BOGDAN_REF }}
           path: bogdan
-      - name: Fail fast if Chrome_150 is not present in this ref
+      - name: Fail fast if Chrome_152 is not present in this ref
         run: |
-          grep -q '"chrome_150"' bogdan/profiles/profiles.go \
-            || { echo "::error::Chrome_150 not found in bogdan ref ${BOGDAN_REF}"; exit 1; }
+          grep -q '"chrome_152"' bogdan/profiles/profiles.go \
+            || { echo "::error::Chrome_152 not found in bogdan ref ${BOGDAN_REF}"; exit 1; }
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Install mingw-w64 (windows cross-compiler)
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
-      - name: Pin cffi dep to bogdan master (brings in Chrome_150) and build
+      - name: Pin cffi dep to bogdan master (brings in Chrome_152) and build
         working-directory: bogdan/cffi_dist
         run: |
           set -euxo pipefail
@@ -111,7 +111,7 @@ jobs:
           if-no-files-found: error
 
   assemble:
-    name: Commit chrome_150 binaries to the fork
+    name: Commit chrome_152 binaries to the fork
     needs: [build-desktop, build-mac]
     runs-on: ubuntu-latest
     steps:
@@ -133,24 +133,24 @@ jobs:
           cp _artifacts/mac-amd64/tls-client-x86.dylib  "$dst/tls-client-x86.dylib"
           cp _artifacts/mac-arm64/tls-client-arm64.dylib "$dst/tls-client-arm64.dylib"
           ls -la "$dst"
-      - name: Stamp version.txt with the chrome_150 build marker
+      - name: Stamp version.txt with the chrome_152 build marker
         run: |
           set -euxo pipefail
           ref_full=$(git ls-remote https://github.com/bogdanfinn/tls-client.git "${BOGDAN_REF}" | cut -f1 | head -c 12)
           [ -n "$ref_full" ] || ref_full="${BOGDAN_REF}"
           now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          printf 'chrome150-master-%s\n%s\n%s\n%s\n' "$ref_full" "$now" "$now" "${{ github.run_id }}" \
+          printf 'chrome152-master-%s\n%s\n%s\n%s\n' "$ref_full" "$now" "$now" "${{ github.run_id }}" \
             > tls_client/dependencies/version.txt
           cat tls_client/dependencies/version.txt
       - name: Commit binaries
         run: |
           set -euxo pipefail
           git config user.email "action@github.com"
-          git config user.name "GitHub Action (chrome150 build)"
+          git config user.name "GitHub Action (chrome152 build)"
           git add tls_client/dependencies/
           if git diff --cached --quiet; then
             echo "No binary changes to commit."
           else
-            git commit -m "build: Chrome_150 c-shared binaries from bogdan master [skip ci]"
+            git commit -m "build: Chrome_152 c-shared binaries from bogdan master [skip ci]"
             git push
           fi

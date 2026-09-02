@@ -28,6 +28,14 @@ ClientIdentifiers: TypeAlias = Literal[
     # Chrome 150 (built from bogdan master; matches CHROME_VERSION=150 UA)
     "chrome_150",
     "chrome_150_PSK",
+    # Chrome 152 (bogdanfinn/tls-client 72add196, 2026-09-02, master only, no
+    # tagged release carries it). Matches CHROME_VERSION=152 in bet337's
+    # config/browser_config.py, whose _tls_identifier_for() reads THIS list and
+    # picks the largest chrome_<n> that is <= the UA major. So adding the two
+    # names here is what moves the fleet off the 2-major UA-vs-JA3 gap; nothing
+    # in bet337 hand-pins them.
+    "chrome_152",
+    "chrome_152_PSK",
     # Other Chrome profiles present in the master binary
     "chrome_130_PSK",
     "chrome_131",

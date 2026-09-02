@@ -43,6 +43,21 @@ setup(
     package_data={
         'tls_client': ['dependencies/' + f for f in _LOADER_FILES],
     },
+    # Both are imported at MODULE level, so without them the package installs
+    # cleanly and then fails on `import tls_client`:
+    #   response.py:7   from requests import HTTPError
+    #   settings.py:1   from typing_extensions import Literal, TypeAlias
+    # There was no install_requires at all, so a standalone
+    # `pip install tls_client2` produced an unimportable package. It only ever
+    # worked because every consumer happened to list requests and
+    # typing_extensions separately in its own requirements file, which makes
+    # this a landmine for the first environment that does not.
+    # requirements.txt pins these exactly; kept as floors here so we do not
+    # fight a consumer's own pin.
+    install_requires=[
+        'requests>=2.31',
+        'typing_extensions>=4.12',
+    ],
     classifiers=[
         "Environment :: Web Environment",
         "Intended Audience :: Developers",

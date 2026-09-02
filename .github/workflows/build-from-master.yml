@@ -46,11 +46,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Install cross-compilers (win 32/64, linux arm64, linux 386)
+      - name: Install mingw cross-compilers (win 32 + 64)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
-                                  gcc-aarch64-linux-gnu gcc-multilib
+          sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686
       - name: Pin cffi dep to bogdan master (brings in Chrome_152) and build
         working-directory: bogdan/cffi_dist
         run: |
@@ -69,10 +68,6 @@ jobs:
           # bogdanfinn silently serves its default profile, so a stale platform
           # was never a loud failure, it was a wrong fingerprint with no error
           # and no log.
-          GOOS=linux   CGO_ENABLED=1 GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
-            go build -buildvcs=false -buildmode=c-shared -o out/tls-client-arm64.so .
-          GOOS=linux   CGO_ENABLED=1 GOARCH=386 CC="gcc -m32" \
-            go build -buildvcs=false -buildmode=c-shared -o out/tls-client-x86.so .
           GOOS=windows CGO_ENABLED=1 GOARCH=386 CC=i686-w64-mingw32-gcc \
             go build -buildvcs=false -buildmode=c-shared -o out/tls-client-32.dll .
           ls -la out
@@ -86,9 +81,54 @@ jobs:
           path: |
             bogdan/cffi_dist/out/tls-client-amd64.so
             bogdan/cffi_dist/out/tls-client-64.dll
-            bogdan/cffi_dist/out/tls-client-arm64.so
-            bogdan/cffi_dist/out/tls-client-x86.so
             bogdan/cffi_dist/out/tls-client-32.dll
+          if-no-files-found: error
+
+  # aarch64-linux-gnu and gcc-multilib CONFLICT on ubuntu-22.04 (each Conflicts:
+  # the other), so these two cannot share a runner with each other or with the
+  # desktop job. One matrix leg per arch is the cheapest way to give each its own.
+  build-linux-cross:
+    name: Build ${{ matrix.out }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: arm64
+            out: tls-client-arm64.so
+            pkg: gcc-aarch64-linux-gnu
+            cc: aarch64-linux-gnu-gcc
+          - goarch: '386'
+            out: tls-client-x86.so
+            pkg: gcc-multilib
+            cc: gcc -m32
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout bogdanfinn/tls-client (${{ env.BOGDAN_REF }})
+        uses: actions/checkout@v4
+        with:
+          repository: bogdanfinn/tls-client
+          ref: ${{ env.BOGDAN_REF }}
+          path: bogdan
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install ${{ matrix.pkg }}
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.pkg }}
+      - name: Build linux/${{ matrix.goarch }}
+        working-directory: bogdan/cffi_dist
+        run: |
+          set -euxo pipefail
+          go get github.com/bogdanfinn/tls-client@${BOGDAN_REF}
+          go mod tidy
+          mkdir -p out
+          GOOS=linux CGO_ENABLED=1 GOARCH=${{ matrix.goarch }} CC="${{ matrix.cc }}" \
+            go build -buildvcs=false -buildmode=c-shared -o out/${{ matrix.out }} .
+          grep -q 'chrome_152' out/${{ matrix.out }} \
+            || { echo '::error::${{ matrix.out }} lacks chrome_152'; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.goarch }}
+          path: bogdan/cffi_dist/out/${{ matrix.out }}
           if-no-files-found: error
 
   build-mac:
@@ -134,7 +174,7 @@ jobs:
 
   assemble:
     name: Commit chrome_152 binaries to the fork
-    needs: [build-desktop, build-mac]
+    needs: [build-desktop, build-linux-cross, build-mac]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this fork
@@ -152,8 +192,8 @@ jobs:
           mkdir -p "$dst"
           cp _artifacts/desktop/tls-client-amd64.so   "$dst/tls-client-amd64.so"
           cp _artifacts/desktop/tls-client-64.dll      "$dst/tls-client-64.dll"
-          cp _artifacts/desktop/tls-client-arm64.so    "$dst/tls-client-arm64.so"
-          cp _artifacts/desktop/tls-client-x86.so      "$dst/tls-client-x86.so"
+          cp _artifacts/linux-arm64/tls-client-arm64.so "$dst/tls-client-arm64.so"
+          cp _artifacts/linux-386/tls-client-x86.so     "$dst/tls-client-x86.so"
           cp _artifacts/desktop/tls-client-32.dll      "$dst/tls-client-32.dll"
           cp _artifacts/mac-amd64/tls-client-x86.dylib  "$dst/tls-client-x86.dylib"
           cp _artifacts/mac-arm64/tls-client-arm64.dylib "$dst/tls-client-arm64.dylib"

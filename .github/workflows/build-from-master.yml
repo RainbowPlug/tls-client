@@ -1,7 +1,7 @@
-name: Build binaries from bogdan master (Chrome 152)
+name: Build binaries from the RainbowPlug fork (Chrome 155)
 
 # Builds the tls-client c-shared native libraries from bogdanfinn/tls-client @ master,
-# which carries the Chrome_152 profile (not yet in any tagged bogdan release).
+# which carries the Chrome_155 profile (not yet in any tagged bogdan release).
 # Produces win-64 + linux-amd64 + darwin-amd64 + darwin-arm64, and commits them into
 # tls_client/dependencies/ under the loader filenames the wrapper expects.
 #
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       bogdan_ref:
-        description: "bogdanfinn/tls-client git ref to build (must contain Chrome_152)"
+        description: "RainbowPlug/tls-client-go git ref to build (must contain Chrome_155)"
         default: "master"
         required: true
   push:
@@ -33,16 +33,16 @@ jobs:
     name: Build windows-64 + linux-amd64
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout bogdanfinn/tls-client (${{ env.BOGDAN_REF }})
+      - name: Checkout RainbowPlug/tls-client-go (${{ env.BOGDAN_REF }})
         uses: actions/checkout@v4
         with:
-          repository: bogdanfinn/tls-client
+          repository: RainbowPlug/tls-client-go
           ref: ${{ env.BOGDAN_REF }}
           path: bogdan
-      - name: Fail fast if Chrome_152 is not present in this ref
+      - name: Fail fast if Chrome_155 is not present in this ref
         run: |
-          grep -q '"chrome_152"' bogdan/profiles/profiles.go \
-            || { echo "::error::Chrome_152 not found in bogdan ref ${BOGDAN_REF}"; exit 1; }
+          grep -q '"chrome_155"' bogdan/profiles/profiles.go \
+            || { echo "::error::Chrome_155 not found in bogdan ref ${BOGDAN_REF}"; exit 1; }
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -50,11 +50,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686
-      - name: Pin cffi dep to bogdan master (brings in Chrome_152) and build
+      - name: Pin cffi dep to bogdan master (brings in Chrome_155) and build
         working-directory: bogdan/cffi_dist
         run: |
           set -euxo pipefail
-          go get github.com/bogdanfinn/tls-client@${BOGDAN_REF}
+          # cffi_dist is its OWN module and resolves tls-client from the
+          # proxy, so checking the fork out is NOT enough: without this
+          # replace it builds UPSTREAM and our profile is silently absent.
+          # A missing identifier does not raise (see the note below), so
+          # that failure mode is a wrong fingerprint with no error.
+          go mod edit -replace github.com/bogdanfinn/tls-client=../
           go mod tidy
           go list -m github.com/bogdanfinn/tls-client
           mkdir -p out
@@ -73,7 +78,7 @@ jobs:
           ls -la out
           # Every binary we ship must carry the profile settings.py advertises.
           for f in out/*.so out/*.dll; do
-            grep -q 'chrome_152' "$f" || { echo "::error::$f lacks chrome_152"; exit 1; }
+            grep -q 'chrome_155' "$f" || { echo "::error::$f lacks chrome_155"; exit 1; }
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -103,10 +108,10 @@ jobs:
             cc: gcc -m32
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout bogdanfinn/tls-client (${{ env.BOGDAN_REF }})
+      - name: Checkout RainbowPlug/tls-client-go (${{ env.BOGDAN_REF }})
         uses: actions/checkout@v4
         with:
-          repository: bogdanfinn/tls-client
+          repository: RainbowPlug/tls-client-go
           ref: ${{ env.BOGDAN_REF }}
           path: bogdan
       - uses: actions/setup-go@v5
@@ -118,13 +123,18 @@ jobs:
         working-directory: bogdan/cffi_dist
         run: |
           set -euxo pipefail
-          go get github.com/bogdanfinn/tls-client@${BOGDAN_REF}
+          # cffi_dist is its OWN module and resolves tls-client from the
+          # proxy, so checking the fork out is NOT enough: without this
+          # replace it builds UPSTREAM and our profile is silently absent.
+          # A missing identifier does not raise (see the note below), so
+          # that failure mode is a wrong fingerprint with no error.
+          go mod edit -replace github.com/bogdanfinn/tls-client=../
           go mod tidy
           mkdir -p out
           GOOS=linux CGO_ENABLED=1 GOARCH=${{ matrix.goarch }} CC="${{ matrix.cc }}" \
             go build -buildvcs=false -buildmode=c-shared -o out/${{ matrix.out }} .
-          grep -q 'chrome_152' out/${{ matrix.out }} \
-            || { echo '::error::${{ matrix.out }} lacks chrome_152'; exit 1; }
+          grep -q 'chrome_155' out/${{ matrix.out }} \
+            || { echo '::error::${{ matrix.out }} lacks chrome_155'; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.goarch }}
@@ -147,10 +157,10 @@ jobs:
     # (macos-13 Intel runners queue unreliably, so we avoid depending on them.)
     runs-on: macos-14
     steps:
-      - name: Checkout bogdanfinn/tls-client (${{ env.BOGDAN_REF }})
+      - name: Checkout RainbowPlug/tls-client-go (${{ env.BOGDAN_REF }})
         uses: actions/checkout@v4
         with:
-          repository: bogdanfinn/tls-client
+          repository: RainbowPlug/tls-client-go
           ref: ${{ env.BOGDAN_REF }}
           path: bogdan
       - uses: actions/setup-go@v5
@@ -160,7 +170,12 @@ jobs:
         working-directory: bogdan/cffi_dist
         run: |
           set -euxo pipefail
-          go get github.com/bogdanfinn/tls-client@${BOGDAN_REF}
+          # cffi_dist is its OWN module and resolves tls-client from the
+          # proxy, so checking the fork out is NOT enough: without this
+          # replace it builds UPSTREAM and our profile is silently absent.
+          # A missing identifier does not raise (see the note below), so
+          # that failure mode is a wrong fingerprint with no error.
+          go mod edit -replace github.com/bogdanfinn/tls-client=../
           go mod tidy
           mkdir -p out
           GOOS=darwin CGO_ENABLED=1 GOARCH=${{ matrix.goarch }} CC="${{ matrix.cc }}" \
@@ -173,7 +188,7 @@ jobs:
           if-no-files-found: error
 
   assemble:
-    name: Commit chrome_152 binaries to the fork
+    name: Commit chrome_155 binaries to the fork
     needs: [build-desktop, build-linux-cross, build-mac]
     runs-on: ubuntu-latest
     steps:
@@ -198,7 +213,7 @@ jobs:
           cp _artifacts/mac-amd64/tls-client-x86.dylib  "$dst/tls-client-x86.dylib"
           cp _artifacts/mac-arm64/tls-client-arm64.dylib "$dst/tls-client-arm64.dylib"
           ls -la "$dst"
-      - name: Stamp version.txt with the chrome_152 build marker
+      - name: Stamp version.txt with the chrome_155 build marker
         run: |
           set -euxo pipefail
           ref_full=$(git ls-remote https://github.com/bogdanfinn/tls-client.git "${BOGDAN_REF}" | cut -f1 | head -c 12)
@@ -216,6 +231,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No binary changes to commit."
           else
-            git commit -m "build: Chrome_152 c-shared binaries from bogdan master [skip ci]"
+            git commit -m "build: Chrome_155 c-shared binaries from the RainbowPlug fork [skip ci]"
             git push
           fi

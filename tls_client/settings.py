@@ -36,6 +36,7 @@ ClientIdentifiers: TypeAlias = Literal[
     # in bet337 hand-pins them.
     "chrome_152",
     "chrome_152_PSK",
+    "chrome_155",
     # Other Chrome profiles present in the master binary
     "chrome_130_PSK",
     "chrome_131",

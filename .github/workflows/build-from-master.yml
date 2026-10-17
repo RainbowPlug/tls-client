@@ -1,6 +1,9 @@
 name: Build binaries from the RainbowPlug fork (Chrome 155)
 
-# Builds the tls-client c-shared native libraries from bogdanfinn/tls-client @ master,
+# Builds the tls-client c-shared native libraries from RainbowPlug/tls-client-go @
+# master, OUR fork, which carries the Chrome_155 profile. The Go MODULE PATH is
+# still github.com/bogdanfinn/tls-client (forks keep it), which is why the
+# replace directive below names that path rather than ours.
 # which carries the Chrome_155 profile (not yet in any tagged bogdan release).
 # Produces win-64 + linux-amd64 + darwin-amd64 + darwin-arm64, and commits them into
 # tls_client/dependencies/ under the loader filenames the wrapper expects.
@@ -216,17 +219,17 @@ jobs:
       - name: Stamp version.txt with the chrome_155 build marker
         run: |
           set -euxo pipefail
-          ref_full=$(git ls-remote https://github.com/bogdanfinn/tls-client.git "${BOGDAN_REF}" | cut -f1 | head -c 12)
+          ref_full=$(git ls-remote https://github.com/RainbowPlug/tls-client-go.git "${BOGDAN_REF}" | cut -f1 | head -c 12)
           [ -n "$ref_full" ] || ref_full="${BOGDAN_REF}"
           now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          printf 'chrome152-master-%s\n%s\n%s\n%s\n' "$ref_full" "$now" "$now" "${{ github.run_id }}" \
+          printf 'chrome155-rainbowplug-%s\n%s\n%s\n%s\n' "$ref_full" "$now" "$now" "${{ github.run_id }}" \
             > tls_client/dependencies/version.txt
           cat tls_client/dependencies/version.txt
       - name: Commit binaries
         run: |
           set -euxo pipefail
           git config user.email "action@github.com"
-          git config user.name "GitHub Action (chrome152 build)"
+          git config user.name "GitHub Action (chrome155 build)"
           git add tls_client/dependencies/
           if git diff --cached --quiet; then
             echo "No binary changes to commit."

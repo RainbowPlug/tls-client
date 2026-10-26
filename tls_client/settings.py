@@ -37,6 +37,11 @@ ClientIdentifiers: TypeAlias = Literal[
     "chrome_152",
     "chrome_152_PSK",
     "chrome_155",
+    # Chrome 156: measured 2026-10-26 identical to chrome_155 on the wire, so
+    # the Go profile is defined AS Chrome_155. Listed here so bet337's
+    # _tls_identifier_for() resolves CHROME_VERSION=156 to chrome_156 exactly
+    # (its gate test asserts chrome_{major}), not a clamp down to chrome_155.
+    "chrome_156",
     # Other Chrome profiles present in the master binary
     "chrome_130_PSK",
     "chrome_131",

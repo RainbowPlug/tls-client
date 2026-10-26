@@ -1,10 +1,11 @@
-name: Build binaries from the RainbowPlug fork (Chrome 155)
+name: Build binaries from the RainbowPlug fork (Chrome 156)
 
 # Builds the tls-client c-shared native libraries from RainbowPlug/tls-client-go @
-# master, OUR fork, which carries the Chrome_155 profile. The Go MODULE PATH is
-# still github.com/bogdanfinn/tls-client (forks keep it), which is why the
-# replace directive below names that path rather than ours.
-# which carries the Chrome_155 profile (not yet in any tagged bogdan release).
+# master, OUR fork, which carries the Chrome_156 profile (= Chrome_155, measured
+# identical 2026-10-26). The Go MODULE PATH is still github.com/bogdanfinn/tls-client
+# (forks keep it), which is why the replace directive below names that path rather
+# than ours.
+# which carries the Chrome_156 profile (not in any tagged bogdan release).
 # Produces win-64 + linux-amd64 + darwin-amd64 + darwin-arm64, and commits them into
 # tls_client/dependencies/ under the loader filenames the wrapper expects.
 #
@@ -15,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       bogdan_ref:
-        description: "RainbowPlug/tls-client-go git ref to build (must contain Chrome_155)"
+        description: "RainbowPlug/tls-client-go git ref to build (must contain Chrome_156)"
         default: "master"
         required: true
   push:
@@ -42,10 +43,10 @@ jobs:
           repository: RainbowPlug/tls-client-go
           ref: ${{ env.BOGDAN_REF }}
           path: bogdan
-      - name: Fail fast if Chrome_155 is not present in this ref
+      - name: Fail fast if Chrome_156 is not present in this ref
         run: |
-          grep -q '"chrome_155"' bogdan/profiles/profiles.go \
-            || { echo "::error::Chrome_155 not found in bogdan ref ${BOGDAN_REF}"; exit 1; }
+          grep -q '"chrome_156"' bogdan/profiles/profiles.go \
+            || { echo "::error::Chrome_156 not found in bogdan ref ${BOGDAN_REF}"; exit 1; }
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -53,7 +54,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686
-      - name: Pin cffi dep to bogdan master (brings in Chrome_155) and build
+      - name: Pin cffi dep to bogdan master (brings in Chrome_156) and build
         working-directory: bogdan/cffi_dist
         run: |
           set -euxo pipefail
@@ -81,7 +82,7 @@ jobs:
           ls -la out
           # Every binary we ship must carry the profile settings.py advertises.
           for f in out/*.so out/*.dll; do
-            grep -q 'chrome_155' "$f" || { echo "::error::$f lacks chrome_155"; exit 1; }
+            grep -q 'chrome_156' "$f" || { echo "::error::$f lacks chrome_156"; exit 1; }
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -136,8 +137,8 @@ jobs:
           mkdir -p out
           GOOS=linux CGO_ENABLED=1 GOARCH=${{ matrix.goarch }} CC="${{ matrix.cc }}" \
             go build -buildvcs=false -buildmode=c-shared -o out/${{ matrix.out }} .
-          grep -q 'chrome_155' out/${{ matrix.out }} \
-            || { echo '::error::${{ matrix.out }} lacks chrome_155'; exit 1; }
+          grep -q 'chrome_156' out/${{ matrix.out }} \
+            || { echo '::error::${{ matrix.out }} lacks chrome_156'; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.goarch }}
@@ -191,7 +192,7 @@ jobs:
           if-no-files-found: error
 
   assemble:
-    name: Commit chrome_155 binaries to the fork
+    name: Commit chrome_156 binaries to the fork
     needs: [build-desktop, build-linux-cross, build-mac]
     runs-on: ubuntu-latest
     steps:
@@ -216,24 +217,24 @@ jobs:
           cp _artifacts/mac-amd64/tls-client-x86.dylib  "$dst/tls-client-x86.dylib"
           cp _artifacts/mac-arm64/tls-client-arm64.dylib "$dst/tls-client-arm64.dylib"
           ls -la "$dst"
-      - name: Stamp version.txt with the chrome_155 build marker
+      - name: Stamp version.txt with the chrome_156 build marker
         run: |
           set -euxo pipefail
           ref_full=$(git ls-remote https://github.com/RainbowPlug/tls-client-go.git "${BOGDAN_REF}" | cut -f1 | head -c 12)
           [ -n "$ref_full" ] || ref_full="${BOGDAN_REF}"
           now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          printf 'chrome155-rainbowplug-%s\n%s\n%s\n%s\n' "$ref_full" "$now" "$now" "${{ github.run_id }}" \
+          printf 'chrome156-rainbowplug-%s\n%s\n%s\n%s\n' "$ref_full" "$now" "$now" "${{ github.run_id }}" \
             > tls_client/dependencies/version.txt
           cat tls_client/dependencies/version.txt
       - name: Commit binaries
         run: |
           set -euxo pipefail
           git config user.email "action@github.com"
-          git config user.name "GitHub Action (chrome155 build)"
+          git config user.name "GitHub Action (chrome156 build)"
           git add tls_client/dependencies/
           if git diff --cached --quiet; then
             echo "No binary changes to commit."
           else
-            git commit -m "build: Chrome_155 c-shared binaries from the RainbowPlug fork [skip ci]"
+            git commit -m "build: Chrome_156 c-shared binaries from the RainbowPlug fork [skip ci]"
             git push
           fi
